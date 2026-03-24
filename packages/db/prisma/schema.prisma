@@ -1,0 +1,260 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum UserRole {
+  SUPER_ADMIN
+  HOTEL_ADMIN
+  CHEF
+  COORDINATOR
+  CLIENT
+}
+
+enum SubscriptionPlan {
+  STARTER
+  PROFESSIONAL
+  ENTERPRISE
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  TRIALING
+  PAST_DUE
+  CANCELED
+  UNPAID
+}
+
+enum BufferStatus {
+  DRAFT
+  PUBLISHED
+  RECEIVED
+  CUSTOMIZED
+  FINALIZED
+}
+
+enum DishCategory {
+  STARTER
+  MAIN
+  DESSERT
+  BEVERAGE
+  SIDE
+  BREAD
+  SALAD
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Hotels (multi-tenant root)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Hotel {
+  id           String  @id @default(cuid())
+  name         String
+  slug         String  @unique
+  logoUrl      String? @map("logo_url")
+  primaryColor String? @map("primary_color") @db.VarChar(7)
+  timezone     String  @default("UTC")
+  locale       String  @default("en")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  users         User[]
+  dishes        Dish[]
+  buffers       Buffer[]
+  subscriptions Subscription[]
+  auditLogs     AuditLog[]
+
+  @@map("hotels")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Users
+// ─────────────────────────────────────────────────────────────────────────────
+
+model User {
+  id        String   @id @default(cuid())
+  hotelId   String   @map("hotel_id")
+  email     String
+  name      String
+  password  String
+  role      UserRole @default(CLIENT)
+  avatarUrl String?  @map("avatar_url")
+  isActive  Boolean  @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  hotel              Hotel      @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  buffersAsChef      Buffer[]   @relation("ChefBuffers")
+  buffersAsCoord     Buffer[]   @relation("CoordinatorBuffers")
+  auditLogs          AuditLog[]
+
+  @@unique([hotelId, email])
+  @@map("users")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Allergens (global reference table)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Allergen {
+  id      String  @id @default(cuid())
+  code    String  @unique
+  label   String
+  labelFr String? @map("label_fr")
+  labelEs String? @map("label_es")
+  icon    String?
+
+  // Relations
+  dishes DishAllergen[]
+
+  @@map("allergens")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Dishes
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Dish {
+  id          String       @id @default(cuid())
+  hotelId     String       @map("hotel_id")
+  name        String
+  nameFr      String?      @map("name_fr")
+  nameEs      String?      @map("name_es")
+  description String?      @db.Text
+  category    DishCategory @default(MAIN)
+  unit        String       @default("portion")
+  costPerUnit Decimal      @map("cost_per_unit") @db.Decimal(10, 4)
+  portionSize Decimal      @map("portion_size") @db.Decimal(10, 3)
+  imageUrl    String?      @map("image_url")
+  isActive    Boolean      @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  hotel       Hotel          @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  allergens   DishAllergen[]
+  bufferItems BufferItem[]
+
+  @@map("dishes")
+}
+
+model DishAllergen {
+  dishId     String @map("dish_id")
+  allergenId String @map("allergen_id")
+
+  dish     Dish     @relation(fields: [dishId], references: [id], onDelete: Cascade)
+  allergen Allergen @relation(fields: [allergenId], references: [id], onDelete: Cascade)
+
+  @@id([dishId, allergenId])
+  @@map("dish_allergens")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Buffers (chef-composed buffet menus)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Buffer {
+  id            String       @id @default(cuid())
+  hotelId       String       @map("hotel_id")
+  chefId        String       @map("chef_id")
+  coordinatorId String?      @map("coordinator_id")
+  name          String
+  eventDate     DateTime     @map("event_date")
+  guestCount    Int          @map("guest_count")
+  status        BufferStatus @default(DRAFT)
+  notes         String?      @db.Text
+  totalCost     Decimal      @default(0) @map("total_cost") @db.Decimal(12, 4)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  hotel       Hotel        @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  chef        User         @relation("ChefBuffers", fields: [chefId], references: [id])
+  coordinator User?        @relation("CoordinatorBuffers", fields: [coordinatorId], references: [id])
+  items       BufferItem[]
+
+  @@map("buffers")
+}
+
+model BufferItem {
+  id          String  @id @default(cuid())
+  bufferId    String  @map("buffer_id")
+  dishId      String  @map("dish_id")
+  quantity    Int     @default(1)
+  portionCount Int    @default(0) @map("portion_count")
+  notes       String? @db.Text
+  sortOrder   Int     @default(0) @map("sort_order")
+
+  // Relations
+  buffer Buffer @relation(fields: [bufferId], references: [id], onDelete: Cascade)
+  dish   Dish   @relation(fields: [dishId], references: [id])
+
+  @@map("buffer_items")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Subscriptions (Stripe)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Subscription {
+  id                   String             @id @default(cuid())
+  hotelId              String             @unique @map("hotel_id")
+  stripeCustomerId     String             @map("stripe_customer_id")
+  stripeSubscriptionId String             @unique @map("stripe_subscription_id")
+  stripePriceId        String             @map("stripe_price_id")
+  plan                 SubscriptionPlan   @default(STARTER)
+  status               SubscriptionStatus @default(TRIALING)
+  currentPeriodStart   DateTime           @map("current_period_start")
+  currentPeriodEnd     DateTime           @map("current_period_end")
+  cancelAtPeriodEnd    Boolean            @default(false) @map("cancel_at_period_end")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  hotel Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+
+  @@map("subscriptions")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Audit Logs
+// ─────────────────────────────────────────────────────────────────────────────
+
+model AuditLog {
+  id         String  @id @default(cuid())
+  hotelId    String  @map("hotel_id")
+  userId     String  @map("user_id")
+  action     String
+  entity     String
+  entityId   String  @map("entity_id")
+  oldValues  Json?   @map("old_values")
+  newValues  Json?   @map("new_values")
+  ipAddress  String? @map("ip_address") @db.VarChar(45)
+  userAgent  String? @map("user_agent") @db.Text
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  hotel Hotel @relation(fields: [hotelId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id])
+
+  @@map("audit_logs")
+}
