@@ -42,3 +42,17 @@ coverage/
 
 # Vercel
 .vercel/
+
+# Laravel backend
+backend/vendor/
+backend/.env
+backend/storage/app/
+backend/storage/framework/cache/
+backend/storage/framework/sessions/
+backend/storage/framework/views/
+backend/storage/logs/
+backend/bootstrap/cache/
+backend/.phpunit.cache
+backend/.phpunit.result.cache
+backend/public/storage
+backend/public/build
